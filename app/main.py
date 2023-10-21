@@ -1,5 +1,5 @@
 # Uncomment this to pass the first stage
-import socket
+import asyncio
 from dataclasses import dataclass
 
 @dataclass
@@ -25,25 +25,27 @@ class BulkString(BaseString):
         stripped_raw = self.strip_control_chars()
         return f"${len(stripped_raw)}\r\n{stripped_raw}\r\n"
 
+async def handle_client(reader, writer):
+    while True:
+        data = await reader.read(1024)
+        if not data:
+            break
+        hello_message = SimpleString("PONG")
+        writer.write(str(hello_message).encode())
+        await writer.drain()
 
-def main():
+    writer.close()
+    await writer.wait_closed()
+
+
+async def main():
     # You can use print statements as follows for debugging, they'll be visible when running tests.
     print("Logs from your program will appear here!")
 
-    # Uncomment this to pass the first stage
-    #
-    server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
-    hello_message = SimpleString("PONG")
-    client_socket, _ = server_socket.accept() # wait for client
-
-    with client_socket:
-        while True:
-            data = client_socket.recv(1024)
-            print(data)
-            if not data:
-                break
-            client_socket.send(str(hello_message).encode())
+    server = await asyncio.start_server(handle_client, 'localhost', 6379, reuse_port=True)
+    async with server:
+        await server.serve_forever()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
