@@ -71,13 +71,15 @@ async def read_bulk_string(client_reader: StreamReader) -> str:
     for i in range(string_length):
         bytes_read += await client_reader.read(1)
 
+    # Todo: Add error if end of the message is not \r\n
+    # Right now, it waits forever.
     end_of_field = await client_reader.read(2)
 
     assert (
         end_of_field == END_OF_FIELD
     ), f"BulkString length mismatch end of field mark {bytes_read}"
 
-    return bytes_read.decode("ascii").lstrip().rstrip()
+    return bytes_read.decode().strip()
 
 
 async def read_array(client_reader: StreamReader) -> list:
@@ -107,6 +109,8 @@ async def handle_command(client_reader: StreamReader, client_writer: StreamWrite
             case "SET":
                 await handle_set(client_writer, arguments)
 
+            case "GET":
+                await handle_get(client_writer, arguments)
 
 async def handle_ping(client_writer: StreamWriter) -> None:
     client_writer.write("+PONG\r\n".encode())
@@ -122,7 +126,21 @@ async def handle_echo(client_writer: StreamWriter, arguments: list) -> None:
     await client_writer.drain()
 
 async def handle_set(client_writer: StreamWriter, arguments: list) -> None:
-    client_writer.write("+You want SET?\r\n".encode())
+    the_key = arguments[0]
+    the_value = arguments[1]
+
+    KV[the_key] = the_value
+
+    client_writer.write("+OK\r\n".encode())
+
+    await client_writer.drain()
+
+async def handle_get(client_writer: StreamWriter, arguments: list) -> None:
+    value = KV.get(arguments[0], "nil")
+
+    value = make_bulk_string([value])
+
+    client_writer.write(value)
 
     await client_writer.drain()
 
@@ -132,7 +150,7 @@ def make_bulk_string(arguments) -> bytes:
 
     result = f"${len(result)}\r\n{result}\r\n"
 
-    return result.encode("ascii")
+    return result.encode()
 
 
 async def main():
