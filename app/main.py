@@ -5,6 +5,8 @@ from typing import Any
 
 END_OF_FIELD = b"\r\n"
 
+KV = {}
+
 
 class DataTypes(Enum):
     SimpleString = 1
@@ -22,7 +24,7 @@ async def read_type(client_reader: StreamReader) -> DataTypes:
         case b"$":
             return DataTypes.BulkString
         case _:
-            raise Exception(f"RedixType is not defined for [{dtype}]")
+            raise Exception(f"DataType is not defined for [{dtype}]")
 
 
 async def read_data(client_reader: StreamReader) -> Any:
@@ -102,6 +104,9 @@ async def handle_command(client_reader: StreamReader, client_writer: StreamWrite
             case "ECHO":
                 await handle_echo(client_writer, arguments)
 
+            case "SET":
+                await handle_set(client_writer, arguments)
+
 
 async def handle_ping(client_writer: StreamWriter) -> None:
     client_writer.write("+PONG\r\n".encode())
@@ -113,6 +118,11 @@ async def handle_echo(client_writer: StreamWriter, arguments: list) -> None:
     bytes_to_send = make_bulk_string(arguments)
 
     client_writer.write(bytes_to_send)
+
+    await client_writer.drain()
+
+async def handle_set(client_writer: StreamWriter, arguments: list) -> None:
+    client_writer.write("+You want SET?\r\n".encode())
 
     await client_writer.drain()
 
