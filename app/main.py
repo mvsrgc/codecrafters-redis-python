@@ -1,116 +1,135 @@
-# Uncomment this to pass the first stage
 import asyncio
-from dataclasses import dataclass
+from asyncio import StreamReader, StreamWriter
 from enum import Enum
+from typing import Any
+
+END_OF_FIELD = b"\r\n"
+
 
 class DataTypes(Enum):
     SimpleString = 1
     BulkString = 2
     Array = 3
 
-def make_simple_string(text):
-    result = f"+{text}\r\n"
-    return result.encode()
 
-def make_bulk_string(arguments):
-    result = " ".join(arguments)
-    result = f"${len(result)}\r\n{result}\r\n"
-    return result.encode()
-
-async def read_type(reader):
-    print(f"------------------------------------")
-    dtype = await reader.read(1)
-    print(f"I am reading a type of {str(dtype)}")
-
+async def read_type(client_reader: StreamReader) -> DataTypes:
+    dtype = await client_reader.read(1)
     match dtype:
         case b"*":
             return DataTypes.Array
         case b"+":
             return DataTypes.SimpleString
         case b"$":
-            print("Hey, I read a $")
             return DataTypes.BulkString
         case _:
-            raise Exception(f"Data type not supported [{dtype}]")
+            raise Exception(f"RedixType is not defined for [{dtype}]")
 
-async def read_data(reader):
-    dtype = await read_type(reader)
+
+async def read_data(client_reader: StreamReader) -> Any:
+    dtype = await read_type(client_reader)
+
     match dtype:
         case DataTypes.Array:
-            return await read_array(reader)
+            return await read_array(client_reader)
+
         case DataTypes.SimpleString:
-            return await read_simple_string(reader)
+            return await read_simple_string(client_reader)
+
         case DataTypes.BulkString:
-            return await read_bulk_string(reader)
+            return await read_bulk_string(client_reader)
+
         case _:
-            raise Exception(f"Read not supported [{dtype}]")
+            raise Exception(f"Read method is not defined for [{dtype}]")
 
-async def read_array(reader):
-    array_length = await read_next_field(reader)
-    array_length = int(array_length.decode().strip())
-    print(f"The array is of length {array_length}")
 
-    results = []
-    for _ in range(array_length):
-        results.append(await read_data(reader))
-        print(f"Results is {results}")
-
-    return results
-
-async def read_simple_string(reader):
-    bytes_read = await read_next_field(reader)
-    return bytes_read.decode().strip()
-
-async def read_bulk_string(reader):
-    print("Reading bulk string...")
-    string_length = await read_next_field(reader)
-    string_length = int(string_length.decode().strip())
-    
-    bytes_read = b""
-    for _ in range(string_length):
-        bytes_read += await reader.read(1)
-
-    # This should be \r\n after a bulk string according to Redis protocol
-    end_of_field = await reader.read(2)
-
-    assert end_of_field == b'\r\n', f"BulkString length mismatch end of field mark {bytes_read}"
-
-    return bytes_read.decode("ascii").strip()
-
-async def read_next_field(reader):
+async def read_next_field(client_reader: StreamReader) -> bytes:
     content = b""
 
-    while (not content.endswith(b"\r\n")) and (data := await reader.read(1)):
+    while (not content.endswith(END_OF_FIELD)) and (
+        data := await client_reader.read(1)
+    ):
         content += data
 
-    print(f"Content of this field: {content}")
     return content
 
-def handle_echo(writer, arguments):
-    bulk_string = make_bulk_string(arguments)
-    writer.write(str(bulk_string).encode())
 
-async def handle_client(reader, writer):
+async def read_simple_string(client_reader: StreamReader) -> str:
+    bytes_read = await read_next_field(client_reader)
+
+    return bytes_read.decode().strip()
+
+
+async def read_bulk_string(client_reader: StreamReader) -> str:
+    string_length = await read_next_field(client_reader)
+
+    string_length = int(string_length.decode().strip())
+
+    bytes_read = b""
+
+    for i in range(string_length):
+        bytes_read += await client_reader.read(1)
+
+    end_of_field = await client_reader.read(2)
+
+    assert (
+        end_of_field == END_OF_FIELD
+    ), f"BulkString length mismatch end of field mark {bytes_read}"
+
+    return bytes_read.decode("ascii").lstrip().rstrip()
+
+
+async def read_array(client_reader: StreamReader) -> list:
+    array_length = await read_next_field(client_reader)
+
+    array_length = int(array_length.decode().strip())
+
+    return [await read_data(client_reader) for _ in range(array_length)]
+
+
+async def handle_command(client_reader: StreamReader, client_writer: StreamWriter):
     while True:
-        print("Gonna read data")
-        command = await read_data(reader)
+        command = await read_data(client_reader)
+
         arguments = []
 
         if isinstance(command, list):
             command, *arguments = command
 
         match command.upper():
+            case "PING":
+                await handle_ping(client_writer)
+
             case "ECHO":
-                handle_echo(writer, arguments)
+                await handle_echo(client_writer, arguments)
 
-        await writer.drain()
 
-    writer.close()
-    await writer.wait_closed()
+async def handle_ping(client_writer: StreamWriter) -> None:
+    client_writer.write("+PONG\r\n".encode())
+
+    await client_writer.drain()
+
+
+async def handle_echo(client_writer: StreamWriter, arguments: list) -> None:
+    bytes_to_send = make_bulk_string(arguments)
+
+    client_writer.write(bytes_to_send)
+
+    await client_writer.drain()
+
+
+def make_bulk_string(arguments) -> bytes:
+    result = " ".join(arguments)
+
+    result = f"${len(result)}\r\n{result}\r\n"
+
+    return result.encode("ascii")
 
 
 async def main():
-    server = await asyncio.start_server(handle_client, 'localhost', 6379, reuse_port=True)
+    server = await asyncio.start_server(
+        client_connected_cb=handle_command, host="localhost", port=6379, reuse_port=True
+    )
+
     async with server:
         await server.serve_forever()
 
