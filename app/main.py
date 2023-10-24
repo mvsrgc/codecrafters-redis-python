@@ -12,6 +12,7 @@ KV = {}
 
 Value = namedtuple("Value", ["value", "expire_time"])
 
+
 class DataTypes(Enum):
     SimpleString = 1
     BulkString = 2
@@ -116,6 +117,7 @@ async def handle_command(client_reader: StreamReader, client_writer: StreamWrite
             case "GET":
                 await handle_get(client_writer, arguments)
 
+
 async def handle_ping(client_writer: StreamWriter) -> None:
     client_writer.write("+PONG\r\n".encode())
 
@@ -128,6 +130,7 @@ async def handle_echo(client_writer: StreamWriter, arguments: list) -> None:
     client_writer.write(bytes_to_send)
 
     await client_writer.drain()
+
 
 async def handle_set(client_writer: StreamWriter, arguments: list) -> None:
     try:
@@ -149,6 +152,7 @@ async def handle_set(client_writer: StreamWriter, arguments: list) -> None:
 
     await client_writer.drain()
 
+
 async def handle_get(client_writer: StreamWriter, arguments: list) -> None:
     if not arguments:
         return
@@ -165,14 +169,17 @@ async def handle_get(client_writer: StreamWriter, arguments: list) -> None:
     client_writer.write(response)
     await client_writer.drain()
 
+
 def make_bulk_string(arguments) -> bytes:
     result = " ".join(arguments)
     response = f"${len(result)}\r\n{result}\r\n"
 
     return response.encode()
 
+
 def make_null_string():
     return b"$-1\r\n"
+
 
 async def main():
     server = await asyncio.start_server(
