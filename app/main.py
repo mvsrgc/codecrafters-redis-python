@@ -2,11 +2,15 @@ import asyncio
 from asyncio import StreamReader, StreamWriter
 from enum import Enum
 from typing import Any
+from collections import namedtuple
+import time
+from datetime import datetime, timedelta
 
 END_OF_FIELD = b"\r\n"
 
 KV = {}
 
+Value = namedtuple("Value", ["value", "expire_time"])
 
 class DataTypes(Enum):
     SimpleString = 1
@@ -126,32 +130,49 @@ async def handle_echo(client_writer: StreamWriter, arguments: list) -> None:
     await client_writer.drain()
 
 async def handle_set(client_writer: StreamWriter, arguments: list) -> None:
-    the_key = arguments[0]
-    the_value = arguments[1]
+    try:
+        the_key, the_value = arguments[:2]
+    except ValueError:
+        return
 
-    KV[the_key] = the_value
+    expire_time = None
+    if len(arguments) > 3 and arguments[2] == "px":
+        try:
+            expire_time = datetime.now() + timedelta(milliseconds=int(arguments[3]))
+        except ValueError:
+            return
+
+    value = Value(the_value, expire_time)
+    KV[the_key] = value
 
     client_writer.write("+OK\r\n".encode())
 
     await client_writer.drain()
 
 async def handle_get(client_writer: StreamWriter, arguments: list) -> None:
-    value = KV.get(arguments[0], "nil")
+    if not arguments:
+        return
 
-    value = make_bulk_string([value])
+    stored_item = KV.get(arguments[0])
+    response = make_bulk_string(["nil"])
 
-    client_writer.write(value)
+    if stored_item:
+        if stored_item.expire_time is None or stored_item.expire_time > datetime.now():
+            response = make_bulk_string([stored_item.value])
+        else:
+            response = make_null_string()
 
+    client_writer.write(response)
     await client_writer.drain()
-
 
 def make_bulk_string(arguments) -> bytes:
     result = " ".join(arguments)
+    response = f"${len(result)}\r\n{result}\r\n"
 
-    result = f"${len(result)}\r\n{result}\r\n"
+    return response.encode()
 
-    return result.encode()
-
+def make_null_string():
+    return b"$-1\r\n"
 
 async def main():
     server = await asyncio.start_server(
