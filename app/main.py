@@ -3,14 +3,18 @@ from asyncio import StreamReader, StreamWriter
 from enum import Enum
 from typing import Any
 from collections import namedtuple
-import time
 from datetime import datetime, timedelta
+from dataclasses import dataclass
 
 END_OF_FIELD = b"\r\n"
 
 KV = {}
 
-Value = namedtuple("Value", ["value", "expire_time"])
+
+@dataclass
+class Value:
+    value: Any
+    expire_time: Any
 
 
 class DataTypes(Enum):
@@ -73,7 +77,7 @@ async def read_bulk_string(client_reader: StreamReader) -> str:
 
     bytes_read = b""
 
-    for i in range(string_length):
+    for _ in range(string_length):
         bytes_read += await client_reader.read(1)
 
     # Todo: Add error if end of the message is not \r\n
