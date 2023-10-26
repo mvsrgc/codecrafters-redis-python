@@ -88,7 +88,6 @@ async def read_client_input(client_reader: StreamReader) -> Any:
             raise Exception("Unexpected dtype")
 
 
-
 async def read_next_resp_field(client_reader: StreamReader) -> bytes:
     content = b""
 
